@@ -4,25 +4,29 @@ import socket
 
 class WebSocketServer:
 
-    def __init__(self):
-        self.port = 0
+    def __init__(self, session_manager):
+        self.session_manager = session_manager
+
+        self.host = 'localhost'
+        self.port = 5050
         self.server = None
-        pass
 
     async def serve(self):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind(('localhost', 0))
-
-        self.port = sock.getsockname()[1]
-
-        print('WebSocket port:', self.port)
-
         async def accept(websocket, path):
-            if path != '/':
+            if websocket.request_headers is None or not path.startswith('/') or len(path) <= 1:
                 websocket.close()
+                return
 
-            while True:
-                data = await websocket.recv()
-                print(data)
+            session_id = path[1:]
+            session = self.session_manager.get(session_id)
 
-        self.server = await websockets.serve(accept, sock=sock)
+            if session is None:
+                await websocket.close()
+                return
+
+            await session.attach_websocket(websocket)
+
+        self.server = await websockets.serve(accept, "0.0.0.0", self.port)
+
+    def get_address(self):
+        return 'ws://{}:{}/'.format(self.host, self.port)
