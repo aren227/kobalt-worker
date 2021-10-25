@@ -8,6 +8,7 @@ import subprocess
 import shutil
 import json
 import platform
+import resource
 
 if 'win' in platform.system().lower():
     import msvcrt
@@ -39,6 +40,7 @@ class Session:
         self.stdout_buffer = None
 
         self.max_execution_time = 60
+        self.max_memory = 64 * 1024 * 1024
 
         self.loop_delay = 0.2
 
@@ -82,11 +84,18 @@ class Session:
 
         self.state = SessionState.RUNNING
 
+        def limit_virtual_memory():
+            # The tuple below is of the form (soft limit, hard limit). Limit only
+            # the soft part so that the limit can be increased later (setting also
+            # the hard limit would prevent that).
+            resource.setrlimit(resource.RLIMIT_AS, (self.max_memory, self.max_memory))
+
         self.process = subprocess.Popen(
             self.language.get_execute_cmd(),
             stdin=subprocess.PIPE, stderr=subprocess.PIPE, stdout=subprocess.PIPE,
             cwd=self.dir,
-            shell=True
+            shell=True,
+            preexec_fn=limit_virtual_memory,
         )
 
         os.set_blocking(self.process.stdout.fileno(), False)
