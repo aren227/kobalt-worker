@@ -3,12 +3,12 @@ import socket
 
 
 class WebSocketServer:
+    host = 'localhost'
+    port = 5050
 
     def __init__(self, session_manager):
         self.session_manager = session_manager
 
-        self.host = 'localhost'
-        self.port = 5050
         self.server = None
 
     async def serve(self):
@@ -28,5 +28,6 @@ class WebSocketServer:
 
         self.server = await websockets.serve(accept, "0.0.0.0", self.port)
 
-    def get_address(self):
-        return 'ws://{}:{}/'.format(self.host, self.port)
+    @staticmethod
+    def get_address():
+        return 'ws://{}:{}/'.format(WebSocketServer.host, WebSocketServer.port)

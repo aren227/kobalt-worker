@@ -28,43 +28,31 @@ class Consumer:
 
         async def process_message(message: aio_pika.IncomingMessage):
             async with message.process():
-                try:
-                    request = json.loads(str(message.body, encoding='utf8'))
+                async def send_compile_result(response):
+                    await channel.default_exchange.publish(
+                        aio_pika.Message(
+                            body=bytes(json.dumps(response), encoding='utf8'),
+                            correlation_id=message.correlation_id
+                        ),
+                        routing_key=message.reply_to,
+                    )
 
-                    print(request)
+                request = json.loads(str(message.body, encoding='utf8'))
 
-                    if not isinstance(request['language'], str) or not isinstance(request['code'], str):
-                        raise InvalidRequestError()
+                print(request)
 
-                    language = Language.get(request['language'])
+                if not isinstance(request['language'], str) or not isinstance(request['code'], str):
+                    await send_compile_result({'result': 'invalid_request'})
+                    return
 
-                    if language is None:
-                        raise LanguageNotFoundError()
+                language = Language.get(request['language'])
 
-                    compile_request = CompileRequest(language, request['code'])
+                if language is None:
+                    await send_compile_result({'result': 'invalid_request'})
+                    return
 
-                    session = self.session_manager.create(compile_request)
+                compile_request = CompileRequest(language, request['code'])
 
-                    session.compile()
-
-                    response = {
-                        'result': 'success',
-                        'address': self.ws_server.get_address(),
-                        'session_id': str(session.id),
-                    }
-
-                except CompileError:
-                    response = {'result': 'compile_error'}
-                    await session.close()
-                except:
-                    response = {'result': 'invalid_request'}
-
-                await channel.default_exchange.publish(
-                    aio_pika.Message(
-                        body=bytes(json.dumps(response), encoding='utf8'),
-                        correlation_id=message.correlation_id
-                    ),
-                    routing_key=message.reply_to,
-                )
+                await self.session_manager.compile_and_run(compile_request, send_compile_result)
 
         await queue.consume(process_message)
