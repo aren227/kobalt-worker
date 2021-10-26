@@ -7,31 +7,19 @@ class WebSocketClient:
         self.session = session
         self.websocket = websocket
 
+    async def send(self, msg):
+        await self.websocket.send(json.dumps(msg))
+
     async def send_stdout(self, msg):
-        await self.websocket.send(
-            json.dumps({
-                'type': 'stdout',
-                'out': msg
-            })
-        )
-
-    async def send_terminated(self, code):
-        await self.websocket.send(
-            json.dumps({
-                'type': 'terminated',
-                'code': code
-            })
-        )
-
-    async def send_timeout(self):
-        await self.websocket.send(
-            json.dumps({
-                'type': 'timeout'
-            })
-        )
+        await self.send({
+            'type': 'stdout',
+            'out': msg
+        })
 
     async def close(self):
-        await self.websocket.close()
+        if not self.websocket.closed:
+            await self.websocket.send
+        self.websocket.close()
 
     async def listen_loop(self):
         # Force break when socket is closed by session but still receiving

@@ -1,5 +1,6 @@
 import asyncio
 
+from close_reason import ClosedBySessionTimeout
 from exception import CompileError
 from session import Session
 from ws_server import WebSocketServer
@@ -42,4 +43,4 @@ class SessionManager:
 
     async def close(self):
         for session in self._sessions.values():
-            await session.close()
+            await session.close(ClosedBySessionTimeout())

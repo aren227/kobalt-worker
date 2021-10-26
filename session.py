@@ -10,6 +10,7 @@ import json
 import platform
 import resource
 
+from close_reason import ClosedByProgramTermination, ClosedBySessionTimeout
 from ws_client import WebSocketClient
 
 if 'win' in platform.system().lower():
@@ -66,19 +67,20 @@ class Session:
         return_code = compile_process.wait()
 
         if return_code != 0:
-            await self.close()
+            await self.close(None)
 
             raise CompileError()
 
         self.state = SessionState.READY
 
     async def run(self):
+        close_reason = None
         try:
-            await self._main_loop()
+            close_reason = await self._main_loop()
         except Exception as e:
             print(e)
             pass
-        await self.close()
+        await self.close(close_reason)
 
     def _execute(self):
         if self.state != SessionState.READY:
@@ -126,18 +128,16 @@ class Session:
 
         while not self.close_signal and self.state in [SessionState.READY, SessionState.RUNNING]:
             if self.process is not None and self.process.poll() is not None:
-                # Send remained buffer
-                await self.send_stdout()
-                await self.ws_client.send_terminated(self.process.poll())
-                break
+                return ClosedByProgramTermination(self.process.poll())
 
             if time() > start_timestamp + self.max_execution_time:
-                await self.ws_client.send_timeout()
-                break
+                return ClosedBySessionTimeout()
 
             await self.send_stdout()
 
             await asyncio.sleep(self.loop_delay)
+
+        return None
 
     async def attach_websocket(self, websocket):
         if self.ws_client is not None:
@@ -151,13 +151,19 @@ class Session:
 
         self.close_signal = True
 
-    async def close(self):
+    async def close(self, reason):
         if self.state == SessionState.TERMINATED:
             return
 
         self.state = SessionState.TERMINATED
 
         if self.ws_client is not None:
+            # Send remained buffer
+            await self.send_stdout()
+
+            if reason is not None:
+                await self.ws_client(reason.get_message())
+
             await self.ws_client.close()
 
         if self.process is not None:
