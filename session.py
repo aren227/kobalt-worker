@@ -10,6 +10,8 @@ import json
 import platform
 import resource
 
+from ws_client import WebSocketClient
+
 if 'win' in platform.system().lower():
     import msvcrt
 
@@ -44,7 +46,7 @@ class Session:
 
         self.loop_delay = 0.2
 
-        self.attached_websocket = None
+        self.ws_client = None
 
         self.close_signal = False
 
@@ -102,79 +104,52 @@ class Session:
 
         self.stdout_buffer = io.BufferedReader(self.process.stdout)
 
-    def _write_to_stdin(self, message):
+    def write_to_stdin(self, message):
         self.process.stdin.write(bytes(message, encoding='utf8'))
         self.process.stdin.flush()
 
     def _read_from_stdout(self):
         return self.stdout_buffer.read1()
 
+    async def send_stdout(self):
+        if self.process is None:
+            return
+
+        out = str(self._read_from_stdout(), encoding='utf8')
+        if len(out) == 0:
+            return
+
+        await self.ws_client.send_stdout(out)
+
     async def _main_loop(self):
         start_timestamp = time()
 
         while not self.close_signal:
-            # TODO: Temporary
             if self.process is not None and self.process.poll() is not None:
-                out = str(self._read_from_stdout(), encoding='utf8')
-                if self.attached_websocket is not None:
-                    if len(out) > 0:
-                        await self.attached_websocket.send(
-                            json.dumps({
-                                'type': 'stdout',
-                                'out': out
-                            })
-                        )
-
-                    msg = {
-                        'type': 'terminated',
-                        'code': self.process.poll()
-                    }
-                    await self.attached_websocket.send(json.dumps(msg))
+                # Send remained buffer
+                await self.send_stdout()
+                await self.ws_client.send_terminated(self.process.poll())
                 break
 
             if time() > start_timestamp + self.max_execution_time:
-                if self.attached_websocket is not None:
-                    msg = {
-                        'type': 'timeout'
-                    }
-                    await self.attached_websocket.send(json.dumps(msg))
+                await self.ws_client.send_timeout()
                 break
 
-            if self.process is not None and self.attached_websocket is not None:
-                out = str(self._read_from_stdout(), encoding='utf8')
-
-                if len(out) > 0:
-                    await self.attached_websocket.send(
-                        json.dumps({
-                            'type': 'stdout',
-                            'out': out
-                        })
-                    )
+            await self.send_stdout()
 
             await asyncio.sleep(self.loop_delay)
 
-    async def _listen_loop(self):
-        # Force break when session is closed but still receiving
-        # websockets.exceptions.ConnectionClosedOK
-        try:
-            while not self.attached_websocket.closed:
-                packet = json.loads(await self.attached_websocket.recv())
-                if packet['type'] == 'stdin':
-                    self._write_to_stdin(packet['in'])
-        except:
-            pass
-
-        self.close_signal = True
-
     async def attach_websocket(self, websocket):
-        if self.attached_websocket is not None:
-            raise Exception('Invalid request')
+        if self.ws_client is not None:
+            return
+
+        self.ws_client = WebSocketClient(self, websocket)
 
         self._execute()
 
-        self.attached_websocket = websocket
+        await self.ws_client.listen_loop()
 
-        await self._listen_loop()
+        self.close_signal = True
 
     async def close(self):
         if self.state == SessionState.TERMINATED:
@@ -182,8 +157,8 @@ class Session:
 
         self.state = SessionState.TERMINATED
 
-        if self.attached_websocket is not None:
-            await self.attached_websocket.close()
+        if self.ws_client is not None:
+            await self.ws_client.close()
 
         if self.process is not None:
             self.process.kill()
