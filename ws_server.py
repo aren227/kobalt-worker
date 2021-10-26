@@ -3,7 +3,7 @@ import socket
 
 
 class WebSocketServer:
-    host = 'localhost'
+    host = 'kobalt-worker'
     port = 5050
 
     def __init__(self, session_manager):
