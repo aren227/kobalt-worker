@@ -124,7 +124,7 @@ class Session:
     async def _main_loop(self):
         start_timestamp = time()
 
-        while not self.close_signal:
+        while not self.close_signal and self.state in [SessionState.READY, SessionState.RUNNING]:
             if self.process is not None and self.process.poll() is not None:
                 # Send remained buffer
                 await self.send_stdout()

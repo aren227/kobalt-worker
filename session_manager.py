@@ -40,6 +40,6 @@ class SessionManager:
     def get(self, session_id):
         return self._sessions.get(str(session_id))
 
-    def close(self):
+    async def close(self):
         for session in self._sessions.values():
-            session.close()
+            await session.close()

@@ -20,4 +20,4 @@ if __name__ == '__main__':
     try:
         loop.run_forever()
     finally:
-        session_manager.close()
+        loop.run_until_complete(session_manager.close())
