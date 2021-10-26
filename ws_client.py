@@ -17,9 +17,7 @@ class WebSocketClient:
         })
 
     async def close(self):
-        if not self.websocket.closed:
-            await self.websocket.send
-        self.websocket.close()
+        await self.websocket.close()
 
     async def listen_loop(self):
         # Force break when socket is closed by session but still receiving

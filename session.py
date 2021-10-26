@@ -166,7 +166,7 @@ class Session:
             await self.send_stdout()
 
             if reason is not None:
-                await self.ws_client(reason.get_message())
+                await self.ws_client.send(reason.get_message())
 
             await self.ws_client.close()
 
@@ -178,7 +178,7 @@ class Session:
 
         shutil.rmtree(self.dir)
 
-        print('Session {} closed (reason: {}).'.format(self.id, reason))
+        print('Session {} closed (reason: {}).'.format(self.id, reason.__class__.__name__))
 
 
 class SessionState(Enum):

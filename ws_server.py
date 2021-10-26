@@ -14,7 +14,7 @@ class WebSocketServer:
     async def serve(self):
         async def accept(websocket, path):
             if websocket.request_headers is None or not path.startswith('/') or len(path) <= 1:
-                websocket.close()
+                await websocket.close()
                 return
 
             session_id = path[1:]
