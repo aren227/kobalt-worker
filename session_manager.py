@@ -21,8 +21,8 @@ class SessionManager:
 
             try:
                 await session.compile()
-            except CompileError:
-                await compile_response_callback({'result': 'compile_error'})
+            except CompileError as e:
+                await compile_response_callback({'result': 'compile_error', 'message': e.message})
                 return
             except:
                 await compile_response_callback({'result': 'internal_error'})

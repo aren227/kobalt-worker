@@ -63,14 +63,20 @@ class Session:
 
         compile_process = subprocess.Popen(
             self.language.get_compile_cmd(self.code_file_name),
+            stderr=subprocess.PIPE,
             cwd=self.dir
         )
+
+        os.set_blocking(compile_process.stderr.fileno(), False)
+
+        stderr_buffer = io.BufferedReader(compile_process.stderr)
+
         return_code = compile_process.wait()
 
         if return_code != 0:
             await self.close(None)
 
-            raise CompileError()
+            raise CompileError(str(stderr_buffer.read1(), encoding='utf8'))
 
         self.state = SessionState.READY
 
