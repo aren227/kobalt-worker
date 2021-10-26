@@ -18,3 +18,8 @@ class ClosedByProgramTermination(CloseReason):
 class ClosedBySessionTimeout(CloseReason):
     def get_message(self):
         return {'type': 'timeout'}
+
+
+class ClosedByWebSocketConnectionTimeout(CloseReason):
+    def get_message(self):
+        return {'type': 'connection_timeout'}

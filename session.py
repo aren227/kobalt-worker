@@ -10,7 +10,7 @@ import json
 import platform
 import resource
 
-from close_reason import ClosedByProgramTermination, ClosedBySessionTimeout
+from close_reason import ClosedByProgramTermination, ClosedBySessionTimeout, ClosedByWebSocketConnectionTimeout
 from ws_client import WebSocketClient
 
 if 'win' in platform.system().lower():
@@ -42,6 +42,7 @@ class Session:
 
         self.stdout_buffer = None
 
+        self.max_connection_accept_time = 5
         self.max_execution_time = 60
         self.max_memory = 64 * 1024 * 1024
 
@@ -130,6 +131,9 @@ class Session:
             if self.process is not None and self.process.poll() is not None:
                 return ClosedByProgramTermination(self.process.poll())
 
+            if self.state == SessionState.READY and time() > start_timestamp + self.max_connection_accept_time:
+                return ClosedByWebSocketConnectionTimeout()
+
             if time() > start_timestamp + self.max_execution_time:
                 return ClosedBySessionTimeout()
 
@@ -174,7 +178,7 @@ class Session:
 
         shutil.rmtree(self.dir)
 
-        print('Session {} closed.'.format(self.id))
+        print('Session {} closed (reason: {}).'.format(self.id, reason))
 
 
 class SessionState(Enum):
