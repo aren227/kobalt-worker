@@ -17,4 +17,7 @@ if __name__ == '__main__':
     loop.run_until_complete(ws_server.serve())
     loop.run_until_complete(consumer.consume())
 
-    loop.run_forever()
+    try:
+        loop.run_forever()
+    finally:
+        session_manager.close()
