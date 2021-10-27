@@ -10,8 +10,9 @@ import json
 import platform
 import resource
 
-from close_reason import ClosedByProgramTermination, ClosedBySessionTimeout, ClosedByWebSocketConnectionTimeout
-from ws_client import WebSocketClient
+from close_reason import ClosedByProgramTermination, ClosedBySessionTimeout, \
+    ClosedByCompileError, ClosedByClientDisconnect, ClosedByInvalidRequest
+from language import Language
 
 if 'win' in platform.system().lower():
     import msvcrt
@@ -26,37 +27,46 @@ from exception import CompileError
 
 class Session:
 
-    def __init__(self, compile_request, loop):
-        self.id = uuid4()
+    def __init__(self, consumer, target_queue, target_id, loop):
+        self.consumer = consumer
+
+        self.target_queue = target_queue
+        self.target_id = target_id
+
         self.loop = loop
 
         self.state = SessionState.COMPILE
 
-        self.language = compile_request.language
-        self.code = compile_request.code
+        self.language = None
+        self.code = None
 
         self.process = None
 
-        self.dir = os.getcwd() + '/kobalt-worker/{}'.format(self.id)
-        self.code_file_name = 'code' + self.language.file_ext
+        self.dir = os.getcwd() + '/kobalt-worker/{}'.format(self.target_id)
+        self.code_file_name = None
 
         self.stdout_buffer = None
 
-        self.max_connection_accept_time = 5
         self.max_execution_time = 60
         self.max_memory = 64 * 1024 * 1024
 
         self.loop_delay = 0.2
 
-        self.ws_client = None
-
-        self.close_signal = False
-
         os.makedirs(self.dir, exist_ok=True)
 
-        print('Session {} created.'.format(self.id))
+        print('Session {} created.'.format(self.target_id))
 
-    async def compile(self):
+    async def compie_and_run(self, compile_request):
+        if compile_request.get('language') is None or compile_request.get('code') is None \
+                or Language.get(str(compile_request.get('language'))) is None:
+            await self.close(ClosedByInvalidRequest())
+            return
+
+        self.language = Language.get(str(compile_request.get('language')))
+        self.code = str(compile_request.get('code'))
+
+        self.code_file_name = 'code' + self.language.file_ext
+
         f = open('{}/{}'.format(self.dir, self.code_file_name), 'w')
         f.write(self.code)
         f.close()
@@ -74,25 +84,29 @@ class Session:
         return_code = compile_process.wait()
 
         if return_code != 0:
-            await self.close(None)
+            compiler_out = str(stderr_buffer.read1(), encoding='utf8')
 
-            raise CompileError(str(stderr_buffer.read1(), encoding='utf8'))
+            await self.close(ClosedByCompileError(compiler_out))
 
-        self.state = SessionState.READY
-
-    async def run(self):
-        close_reason = None
-        try:
-            close_reason = await self._main_loop()
-        except Exception as e:
-            print(e)
-            pass
-        await self.close(close_reason)
-
-    def _execute(self):
-        if self.state != SessionState.READY:
             return
 
+        await self.send_message({'type': 'compile_success', 'queue': self.consumer.queue})
+
+        await self._run()
+
+    async def send_message(self, message):
+        await self.consumer.send(self, message)
+
+    async def handle_message(self, message):
+        try:
+            if message['type'] == 'stdin':
+                self.write_to_stdin(message['in'])
+            elif message['type'] == 'closed':
+                await self.close(ClosedByClientDisconnect())
+        except:
+            pass
+
+    async def _run(self):
         self.state = SessionState.RUNNING
 
         def limit_virtual_memory():
@@ -113,6 +127,14 @@ class Session:
 
         self.stdout_buffer = io.BufferedReader(self.process.stdout)
 
+        close_reason = None
+        try:
+            close_reason = await self._main_loop()
+        except Exception as e:
+            print(e)
+            pass
+        await self.close(close_reason)
+
     def write_to_stdin(self, message):
         self.process.stdin.write(bytes(message, encoding='utf8'))
         self.process.stdin.flush()
@@ -128,17 +150,14 @@ class Session:
         if len(out) == 0:
             return
 
-        await self.ws_client.send_stdout(out)
+        await self.send_message({'type': 'stdout', 'out': out})
 
     async def _main_loop(self):
         start_timestamp = time()
 
-        while not self.close_signal and self.state in [SessionState.READY, SessionState.RUNNING]:
+        while self.state == SessionState.RUNNING:
             if self.process is not None and self.process.poll() is not None:
                 return ClosedByProgramTermination(self.process.poll())
-
-            if self.state == SessionState.READY and time() > start_timestamp + self.max_connection_accept_time:
-                return ClosedByWebSocketConnectionTimeout()
 
             if time() > start_timestamp + self.max_execution_time:
                 return ClosedBySessionTimeout()
@@ -149,32 +168,18 @@ class Session:
 
         return None
 
-    async def attach_websocket(self, websocket):
-        if self.ws_client is not None:
-            return
-
-        self.ws_client = WebSocketClient(self, websocket)
-
-        self._execute()
-
-        await self.ws_client.listen_loop()
-
-        self.close_signal = True
-
     async def close(self, reason):
         if self.state == SessionState.TERMINATED:
             return
 
         self.state = SessionState.TERMINATED
 
-        if self.ws_client is not None:
-            # Send remained buffer
-            await self.send_stdout()
+        await self.send_stdout()
 
-            if reason is not None:
-                await self.ws_client.send(reason.get_message())
+        if reason and reason.get_message():
+            await self.send_message(reason.get_message())
 
-            await self.ws_client.close()
+        await self.send_message({'type': 'closed'})
 
         if self.process is not None:
             self.process.kill()
@@ -184,11 +189,10 @@ class Session:
 
         shutil.rmtree(self.dir)
 
-        print('Session {} closed (reason: {}).'.format(self.id, reason.__class__.__name__))
+        print('Session {} closed (reason: {}).'.format(self.target_id, reason.__class__.__name__))
 
 
 class SessionState(Enum):
     COMPILE = 1
-    READY = 2
-    RUNNING = 3
-    TERMINATED = 4
+    RUNNING = 2
+    TERMINATED = 3

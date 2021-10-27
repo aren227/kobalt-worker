@@ -7,6 +7,14 @@ class CloseReason(metaclass=ABCMeta):
         pass
 
 
+class ClosedByCompileError(CloseReason):
+    def __init__(self, out):
+        self.out = out
+
+    def get_message(self):
+        return {'type': 'compile_error', 'out': self.out}
+
+
 class ClosedByProgramTermination(CloseReason):
     def __init__(self, code):
         self.code = code
@@ -20,6 +28,11 @@ class ClosedBySessionTimeout(CloseReason):
         return {'type': 'timeout'}
 
 
-class ClosedByWebSocketConnectionTimeout(CloseReason):
+class ClosedByClientDisconnect(CloseReason):
     def get_message(self):
-        return {'type': 'connection_timeout'}
+        return None
+
+
+class ClosedByInvalidRequest(CloseReason):
+    def get_message(self):
+        return None

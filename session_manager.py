@@ -3,7 +3,6 @@ import asyncio
 from close_reason import ClosedBySessionTimeout
 from exception import CompileError
 from session import Session
-from ws_server import WebSocketServer
 
 
 class SessionManager:
@@ -13,33 +12,20 @@ class SessionManager:
         self.semaphore = asyncio.Semaphore(10)  # Max session count
         self._sessions = {}
 
-    async def compile_and_run(self, compile_request, compile_response_callback):
+    async def compile_and_run(self, consumer, target_queue, target_id, compile_request):
+        session = Session(consumer, target_queue, target_id, self.loop)
+        self._sessions[session.target_id] = session
+
+        if session is None:
+            return
+
         async with self.semaphore:
-            session = Session(compile_request, self.loop)
+            await session.compile_and_run(compile_request)
 
-            self._sessions[str(session.id)] = session
+        self._sessions.pop(session.target_id)
 
-            try:
-                await session.compile()
-            except CompileError as e:
-                await compile_response_callback({'result': 'compile_error', 'message': e.message})
-                return
-            except:
-                await compile_response_callback({'result': 'internal_error'})
-                return
-
-            await compile_response_callback({
-                'result': 'success',
-                'address': WebSocketServer.get_address(),
-                'session_id': str(session.id),
-            })
-
-            await session.run()
-
-            self._sessions.pop(str(session.id))
-
-    def get(self, session_id):
-        return self._sessions.get(str(session_id))
+    def get(self, target_id):
+        return self._sessions.get(target_id)
 
     async def close(self):
         for session in self._sessions.values():
