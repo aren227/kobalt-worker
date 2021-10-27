@@ -56,7 +56,7 @@ class Session:
 
         print('Session {} created.'.format(self.target_id))
 
-    async def compie_and_run(self, compile_request):
+    async def compile_and_run(self, compile_request):
         if compile_request.get('language') is None or compile_request.get('code') is None \
                 or Language.get(str(compile_request.get('language'))) is None:
             await self.close(ClosedByInvalidRequest())
