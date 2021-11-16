@@ -9,6 +9,7 @@ import shutil
 import json
 import platform
 import resource
+import pyseccomp
 
 from close_reason import ClosedByProgramTermination, ClosedBySessionTimeout, \
     ClosedByCompileError, ClosedByClientDisconnect, ClosedByInvalidRequest
@@ -109,18 +110,27 @@ class Session:
     async def _run(self):
         self.state = SessionState.RUNNING
 
-        def limit_virtual_memory():
-            # The tuple below is of the form (soft limit, hard limit). Limit only
-            # the soft part so that the limit can be increased later (setting also
-            # the hard limit would prevent that).
+        def setup():
+            # Limit memory
             resource.setrlimit(resource.RLIMIT_AS, (self.max_memory, self.max_memory))
+
+            filt = pyseccomp.SyscallFilter(pyseccomp.KILL)
+
+            whitelist = [
+                "exit_group", "uname", "fstat", "read", "lseek", "close", "getdents64", "readlink", "mmap",
+                "write", "rt_sigaction", "mprotect", "munmap", "brk", "access", "sysinfo", "arch_prctl", "getrandom",
+                "clock_gettime", "clone",
+            ]
+            for syscall in whitelist:
+                filt.add_rule_exactly(pyseccomp.ALLOW, syscall)
+
+            # Only allow read (O_RDONLY = 0)
+            filt.add_rule_exactly(pyseccomp.ALLOW, "openat", pyseccomp.Arg(2, pyseccomp.MASKED_EQ, 0b11, 0))
 
         self.process = subprocess.Popen(
             self.language.get_execute_cmd(),
             stdin=subprocess.PIPE, stderr=subprocess.PIPE, stdout=subprocess.PIPE,
-            cwd=self.dir,
-            shell=True,
-            preexec_fn=limit_virtual_memory,
+            cwd=self.dir, preexec_fn=setup
         )
 
         os.set_blocking(self.process.stdout.fileno(), False)
