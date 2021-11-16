@@ -5,7 +5,7 @@ WORKDIR /usr/src/app
 
 COPY . /usr/src/app
 
-RUN pip install websockets aio_pika
+RUN pip install websockets aio_pika pyseccomp
 
 EXPOSE 5050
 
